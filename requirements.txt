@@ -1,0 +1,18 @@
+--index-url https://pypi.python.org/simple/
+python-dotenv
+python-telegram-bot[webhooks,rate-limiter]==21.0.1
+
+pytz
+msgspec
+PyExecJS
+requests
+html2text
+fake-useragent
+beautifulsoup4
+tiktoken==0.6.0
+lxml-html-clean
+pdfminer.six==20231228
+duckduckgo-search==5.3.1
+
+aiosqlite
+sqlalchemy
