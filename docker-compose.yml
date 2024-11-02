@@ -1,8 +1,8 @@
 services:
-  fastauth:
-    container_name: fastauth
-    image: yym68686/fastauth:latest
+  babelbridge:
+    container_name: babelbridge
+    image: yym68686/babelbridge:latest
     ports:
-      - 8002:8000
+      - 8003:8000
     volumes:
-      - ./fastauth_db:/home/data
+      - ./babelbridge_db:/home/data

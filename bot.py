@@ -302,35 +302,68 @@ async def create_translation_thread(update, context, target_lang):
 
     return thread.message_thread_id
 
+def PrintMessage(func):
+    async def wrapper(*args, **kwargs):
+        update, context = args[:2]
+        import json
+        print("\033[32m")
+        print(json.dumps(update.to_dict(), indent=2, ensure_ascii=False))
+        print("\033[0m")
+        return await func(*args, **kwargs)
+    return wrapper
+
 # 修改 handle_message 函数
+@PrintMessage
 async def handle_message(update, context):
     image_url, chatid, messageid, message_thread_id, convo_id, user_lang = await GetMesageInfo(update, context)
+    print(f"user_lang: {user_lang}")
+    print(f"message_thread_id: {message_thread_id}")
+    print(f"chatid: {chatid}")
+    print(f"messageid: {messageid}")
+    print(f"whitelist: {whitelist}")
 
     user_id = str(update.effective_user.id)
+    print(f"user_id: {user_id}")
+    print("user_id in whitelist", user_id in whitelist)
     is_admin = user_id in whitelist if whitelist else False
+    print(f"is_admin: {is_admin}")
     message = update.message.text
 
-    robot, role, api_key, api_url = get_robot(convo_id)
+    robot, api_key, api_url = get_robot(convo_id)
 
-    if is_admin and message_thread_id:
-        async with async_session() as session:
-            mapping = await session.execute(
-                select(UserTopicMapping).filter_by(
-                    topic_id=message_thread_id,
-                    group_id=str(chatid)
+    if is_admin:
+        if message_thread_id:
+            async with async_session() as session:
+                mapping = await session.execute(
+                    select(UserTopicMapping).filter_by(
+                        topic_id=message_thread_id,
+                        group_id=str(chatid)
+                    )
                 )
+                mapping = mapping.scalar_one_or_none()
+
+                if mapping:
+                    # 如果用户语言与消息语言相同，直接发送原文
+                    if 'zh' in user_lang:
+                        text_to_send = message
+                    else:
+                        translated = await robot.ask_async(
+                            f"Translate the following text to {user_lang}:\n{message}",
+                            convo_id=convo_id
+                        )
+                        text_to_send = translated
+
+                    await context.bot.send_message(
+                        chat_id=mapping.user_chat_id,
+                        text=text_to_send
+                    )
+        else:
+            # 管理员在群组中发送消息，转发到话题
+            await context.bot.send_message(
+                chat_id=chatid,
+                message_thread_id=message_thread_id,
+                text=message
             )
-            mapping = mapping.scalar_one_or_none()
-
-            if mapping:
-                translated = await robot.ask_async(
-                    f"Translate the following text to {user_lang}:\n{message}",
-                    convo_id=convo_id
-                )
-                await context.bot.send_message(
-                    chat_id=mapping.user_chat_id,
-                    text=translated
-                )
     else:
         # 普通用户的处理逻辑保持不变
         if not message_thread_id:
@@ -341,7 +374,7 @@ async def handle_message(update, context):
             convo_id=convo_id
         )
         await context.bot.send_message(
-            chat_id=chatid,
+            chat_id=whitelist[0],
             message_thread_id=message_thread_id,
             text=f"Original:\n{message}\n\nTranslated:\n{translated}",
             reply_to_message_id=messageid
