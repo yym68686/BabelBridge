@@ -39,7 +39,7 @@ jobs:
       with:
         registry: ghcr.io
         username: ${{ github.actor }}
-        password: ${{ secrets.PACK_TOKEN }}
+        password: ${{ secrets.PAT_TOKEN }}
 
     - name: Get current version
       id: get_version
