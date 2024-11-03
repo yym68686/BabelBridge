@@ -66,6 +66,8 @@ async def GetMesageInfo(update, context):
 from dotenv import load_dotenv
 load_dotenv()
 import os
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
 CLAUDE_API = os.environ.get('CLAUDE_API_KEY', None)
 GOOGLE_AI_API_KEY = os.environ.get('GOOGLE_AI_API_KEY', None)
 temperature = float(os.environ.get('TEMPERATURE', '0'))
@@ -275,7 +277,6 @@ async def post_init(application: Application) -> None:
     await application.bot.set_my_commands([
         BotCommand('start', 'Start'),
     ])
-BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # 修改 create_translation_thread 函数
 async def create_translation_thread(update, context, target_lang):
