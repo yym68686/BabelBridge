@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 
 import time
+import json
 
 time_out = 600
 
@@ -67,12 +68,15 @@ from dotenv import load_dotenv
 load_dotenv()
 import os
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+GROUP_ID = os.getenv("GROUP_ID")
 
 CLAUDE_API = os.environ.get('CLAUDE_API_KEY', None)
 GOOGLE_AI_API_KEY = os.environ.get('GOOGLE_AI_API_KEY', None)
 temperature = float(os.environ.get('TEMPERATURE', '0'))
+
 api_key = os.environ.get('API')
 api_url = os.environ.get('API_URL', 'https://api.openai.com/v1/chat/completions')
+
 engine = os.environ.get('ENGINE', 'gpt-4-turbo')
 whitelist = os.environ.get('WHITELIST', "")
 if whitelist == "":
@@ -214,6 +218,9 @@ class UserTopicMapping(Base):
     topic_id = Column(Integer, nullable=False)          # 话题id
     group_id = Column(String(255), nullable=False)      # 群组id
     created_at = Column(Integer, nullable=False)        # 创建时间戳
+    user_lang = Column(String(10))                      # 用户语言
+    last_message = Column(Text)                         # 最后一次对话内容
+    last_message_time = Column(Integer)                 # 最后一次对话时间
 
 # 修改数据库配置部分
 db_path = os.getenv('DB_PATH', './data/stats.db')
@@ -280,23 +287,22 @@ async def post_init(application: Application) -> None:
 
 # 修改 create_translation_thread 函数
 async def create_translation_thread(update, context, target_lang):
-    chat = update.effective_chat
     user_chat_id = str(update.effective_user.id)
-    title = f"Translation to {target_lang}"
+    username = update.effective_user.username or update.effective_user.first_name or str(update.effective_user.id)
 
     thread = await context.bot.create_forum_topic(
-        chat_id=chat.id,
-        name=title
+        chat_id=GROUP_ID,
+        name=username
     )
 
-    # 使用异步会话
     async with async_session() as session:
         async with session.begin():
             mapping = UserTopicMapping(
                 user_chat_id=user_chat_id,
                 topic_id=thread.message_thread_id,
-                group_id=str(chat.id),
-                created_at=int(time.time())
+                group_id=GROUP_ID,
+                created_at=int(time.time()),
+                user_lang=target_lang  # 添加用户语言
             )
             session.add(mapping)
             await session.commit()
@@ -316,23 +322,47 @@ def PrintMessage(func):
 # 修改 handle_message 函数
 @PrintMessage
 async def handle_message(update, context):
+    await init_db()
+
     image_url, chatid, messageid, message_thread_id, convo_id, user_lang = await GetMesageInfo(update, context)
-    print(f"user_lang: {user_lang}")
-    print(f"message_thread_id: {message_thread_id}")
-    print(f"chatid: {chatid}")
-    print(f"messageid: {messageid}")
-    print(f"whitelist: {whitelist}")
+    admin_chat = await context.bot.get_chat_member(GROUP_ID, whitelist[0])
+    admin_lang = admin_chat.user.language_code if admin_chat.user else 'en'
+    # print(f"message_thread_id: {message_thread_id}")
+    # print(f"chatid: {chatid}")
+    # print(f"messageid: {messageid}")
+    # print(f"whitelist: {whitelist}")
 
     user_id = str(update.effective_user.id)
     print(f"user_id: {user_id}")
     print("user_id in whitelist", user_id in whitelist)
     is_admin = user_id in whitelist if whitelist else False
     print(f"is_admin: {is_admin}")
+    if not is_admin:
+        print(f"user_lang: {user_lang}")
+    print(f"admin_lang: {admin_lang}")
+    chat = await context.bot.get_chat(GROUP_ID)
+    if not chat.is_forum:
+        print(f"Error: Group {GROUP_ID} is not a forum")
+        await update.message.reply_text("群组需要是论坛类型才能使用此功能，请联系群组管理员。")
+        return None
+
+    # 添加权限检查
+    bot_member = await context.bot.get_chat_member(GROUP_ID, context.bot.id)
+    if not bot_member.can_manage_topics:
+        print(json.dumps(bot_member.to_dict(), indent=2, ensure_ascii=False))
+        # print(f"bot_member: {bot_member}")
+        print(f"Error: Bot doesn't have permission to manage topics in group {GROUP_ID}")
+        await update.message.reply_text("Bot需要管理员权限才能创建话题，请联系群组管理员。")
+        return None
+
     message = update.message.text
 
-    robot, api_key, api_url = get_robot(convo_id)
+    global engine, api_key, api_url
+
+    robot, api_key, api_url = get_robot(engine, api_key, api_url)
 
     if is_admin:
+        print(f"message_thread_id: {message_thread_id}")
         if message_thread_id:
             async with async_session() as session:
                 mapping = await session.execute(
@@ -344,15 +374,20 @@ async def handle_message(update, context):
                 mapping = mapping.scalar_one_or_none()
 
                 if mapping:
-                    # 如果用户语言与消息语言相同，直接发送原文
-                    if 'zh' in user_lang:
-                        text_to_send = message
-                    else:
+                    # 如果用户最后一条消息的语言与管理员消息语言不同，进行翻译
+                    user_lang = mapping.user_lang
+
+                    if user_lang != admin_lang:
                         translated = await robot.ask_async(
-                            f"Translate the following text to {user_lang}:\n{message}",
-                            convo_id=convo_id
+                            f"Translate the following text from {admin_lang} to {user_lang}:\n{message}",
+                            convo_id=convo_id,
+                            model=engine,
+                            api_key=api_key,
+                            api_url=api_url,
                         )
                         text_to_send = translated
+                    else:
+                        text_to_send = message
 
                     await context.bot.send_message(
                         chat_id=mapping.user_chat_id,
@@ -367,21 +402,60 @@ async def handle_message(update, context):
             )
     else:
         # 普通用户的处理逻辑保持不变
-        if not message_thread_id:
-            message_thread_id = await create_translation_thread(update, context, user_lang)
+        # 先检查用户是否已有活跃的thread
+        async with async_session() as session:
+            existing_mapping = await session.execute(
+                select(UserTopicMapping)
+                .filter_by(user_chat_id=user_id)
+                .order_by(UserTopicMapping.created_at.desc())
+                .limit(1)
+            )
+            existing_mapping = existing_mapping.scalar_one_or_none()
+
+            if existing_mapping:
+                message_thread_id = existing_mapping.topic_id
+            else:
+                # 如果没有现有thread，创建新的
+                message_thread_id = await create_translation_thread(update, context, user_lang)
+
+        async with async_session() as session:
+            # 修改查询逻辑，只获取最新的一条记录
+            mapping = await session.execute(
+                select(UserTopicMapping)
+                .filter_by(user_chat_id=user_id)
+                .order_by(UserTopicMapping.created_at.desc())
+                .limit(1)  # 添加这行来限制只返回一条记录
+            )
+            mapping = mapping.scalar_one_or_none()
+
+            if mapping:
+                mapping.last_message = message
+                mapping.last_message_time = int(time.time())
+                mapping.user_lang = user_lang
+                await session.commit()
 
         translated = await robot.ask_async(
-            f"Translate the following text to {user_lang}:\n{message}",
-            convo_id=convo_id
-        )
-        await context.bot.send_message(
-            chat_id=whitelist[0],
-            message_thread_id=message_thread_id,
-            text=f"Original:\n{message}\n\nTranslated:\n{translated}",
-            reply_to_message_id=messageid
+            f"Translate the following text to {admin_lang}:\n{message}",
+            convo_id=convo_id,
+            model=engine,
+            api_key=api_key,
+            api_url=api_url,
         )
 
+        await context.bot.send_message(
+            chat_id=GROUP_ID,
+            message_thread_id=message_thread_id,
+            text=f"Original:\n{message}\n\nTranslated:\n{translated}",
+            # reply_to_message_id=messageid
+        )
+
+# 在 __main__ 部分之前添加初始化数据库的函数
+async def init_db():
+    async with database_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
 if __name__ == '__main__':
+
     application = (
         ApplicationBuilder()
         .token(BOT_TOKEN)
@@ -412,7 +486,6 @@ if __name__ == '__main__':
 
     application.add_handler(CommandHandler("start", start))
 
-    # 添加消息处理器
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
         handle_message
