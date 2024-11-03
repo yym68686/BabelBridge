@@ -6,7 +6,7 @@ on:
       - main
     paths:
       - VERSION
-      - main.py
+      - bot.py
       - Dockerfile
       - .dockerignore
       - requirements.txt
