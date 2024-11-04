@@ -13,13 +13,7 @@ import time
 import json
 
 time_out = 600
-
-async def start(update, context):
-    user = update.effective_user
-    message = (
-        f"Hi `{user.username}` !"
-    )
-    await update.message.reply_text(message)
+with_original = False
 
 async def get_file_url(file, context):
     file_id = file.file_id
@@ -63,6 +57,26 @@ async def GetMesageInfo(update, context):
     if update.effective_user:
         user_lang = update.effective_user.language_code
     return image_url, chatid, messageid, message_thread_id, convo_id, user_lang
+
+welcome_message = {
+    "zh-hans": "你好，你可以使用你的母语给机器人发送消息来跟我交流，希望这个机器人可以提高人类沟通的效率。本机器人可以把你的母语翻译为我的母语，同时会把我的母语翻译为你的母语，在我们彼此看来就像是跟同一个国家的人聊天一样，大大提高了沟通效率。如果你是母语是俄语，我的母语是中文，我们不必都转换为英语交流，这会阻碍我们的交流。你给机器人发送俄语消息，机器人会自动把俄语翻译为中文，我对机器人发送中文消息则自动翻译为俄语转发给你。",
+    "zh-hant": "你好，你可以使用你的母語給機器人發送消息來跟我交流，希望這個機器人可以提高人類溝通的效率。本機器人可以把你的母語翻譯為我的母語，同時會把我的母語翻譯為你的母語，在我們彼此看來就像是跟同一個國家的人聊天一樣，大大提高了溝通效率。如果你的母語是俄語，我的母語是中文，我們不必都轉換為英語交流，這會阻礙我們的交流。你給機器人發送俄語消息，機器人會自動把俄語翻譯為中文，我對機器人發送中文消息則自動翻譯為俄語轉發給你。",
+    "ru": "Привет, ты можешь использовать свой родной язык, чтобы отправить сообщение роботу для общения со мной. Надеюсь, этот робот поможет повысить эффективность общения между людьми. Этот робот может перевести твой родной язык на мой родной язык, а также перевести мой родной язык на твой. Таким образом, нам будет казаться, что мы общаемся как люди из одной страны, что значительно повысит эффективность общения. Если твой родной язык — русский, а мой родной язык — китайский, нам не нужно переходить на английский для общения, так как это может затруднить наше взаимодействие. Ты отправляешь роботу сообщение на русском, и робот автоматически переводит его на китайский. Я отправляю роботу сообщение на китайском, и он автоматически переводит его на русский, чтобы переслать тебе.",
+    "en": "Hello, you can use your native language to send messages to the bot to communicate with me. I hope this bot can improve the efficiency of human communication. This bot can translate your native language into my native language, and at the same time, it will translate my native language into your native language. From our perspectives, it will feel like we are chatting as if we are from the same country, significantly improving communication efficiency. If your native language is Russian and mine is Chinese, we don't need to switch to English for communication, as that could hinder our interaction. You can send messages to the bot in Russian, and the bot will automatically translate them into Chinese. When I send messages to the bot in Chinese, it will automatically translate them into Russian and forward them to you."
+}
+
+async def start(update, context):
+    user = update.effective_user
+    if user.language_code == "zh-hans":
+        message = welcome_message["zh-hans"]
+    elif user.language_code == "zh-hant":
+        message = welcome_message["zh-hant"]
+    elif user.language_code == "ru":
+        message = welcome_message["ru"]
+    else:
+        message = welcome_message["en"]
+
+    await update.message.reply_text(escape(message, italic=False))
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -327,10 +341,6 @@ async def handle_message(update, context):
     image_url, chatid, messageid, message_thread_id, convo_id, user_lang = await GetMesageInfo(update, context)
     admin_chat = await context.bot.get_chat_member(GROUP_ID, whitelist[0])
     admin_lang = admin_chat.user.language_code if admin_chat.user else 'en'
-    # print(f"message_thread_id: {message_thread_id}")
-    # print(f"chatid: {chatid}")
-    # print(f"messageid: {messageid}")
-    # print(f"whitelist: {whitelist}")
 
     user_id = str(update.effective_user.id)
     print(f"user_id: {user_id}")
@@ -384,6 +394,7 @@ async def handle_message(update, context):
                             model=engine,
                             api_key=api_key,
                             api_url=api_url,
+                            pass_history=2
                         )
                         text_to_send = translated
                     else:
@@ -440,12 +451,17 @@ async def handle_message(update, context):
             model=engine,
             api_key=api_key,
             api_url=api_url,
+            pass_history=2
         )
 
+        if with_original:
+            result = f"Original:\n{message}\n\nTranslated:\n{translated}"
+        else:
+            result = translated
         await context.bot.send_message(
             chat_id=GROUP_ID,
             message_thread_id=message_thread_id,
-            text=f"Original:\n{message}\n\nTranslated:\n{translated}",
+            text=result,
             # reply_to_message_id=messageid
         )
 
