@@ -389,7 +389,7 @@ async def handle_message(update, context):
 
                     if user_lang != admin_lang:
                         translated = await robot.ask_async(
-                            f"Translate the following text from {admin_lang} to {user_lang}:\n{message}",
+                            f"Only output the translated text, do not include the original text, and do not provide additional explanations. Translate the following text from {admin_lang} to {user_lang}:\n{message}",
                             convo_id=convo_id,
                             model=engine,
                             api_key=api_key,
@@ -400,6 +400,7 @@ async def handle_message(update, context):
                     else:
                         text_to_send = message
 
+                    print(f"result: {text_to_send}")
                     await context.bot.send_message(
                         chat_id=mapping.user_chat_id,
                         text=text_to_send
@@ -446,7 +447,7 @@ async def handle_message(update, context):
                 await session.commit()
 
         translated = await robot.ask_async(
-            f"Translate the following text to {admin_lang}:\n{message}",
+            f"Only output the translated text, do not include the original text, and do not provide additional explanations. Translate the following text to {admin_lang}:\n{message}",
             convo_id=convo_id,
             model=engine,
             api_key=api_key,
@@ -458,6 +459,9 @@ async def handle_message(update, context):
             result = f"Original:\n{message}\n\nTranslated:\n{translated}"
         else:
             result = translated
+
+        print(f"result: {result}")
+
         await context.bot.send_message(
             chat_id=GROUP_ID,
             message_thread_id=message_thread_id,
